@@ -1,0 +1,21 @@
+''' Exceptions '''
+
+class BoxExceptionError(Exception):
+	pass
+class BoxKeyAccessError(BoxExceptionError):
+	pass
+class BoxItemAccessError(BoxExceptionError):
+	pass
+class BoxItemTypeError(BoxExceptionError):
+	pass
+class BoxNameError(BoxExceptionError):
+	pass
+class BoxLockedError(BoxExceptionError):
+	pass
+class BoxImplementationError(BoxExceptionError):
+	pass
+
+
+
+
+
