@@ -3,4 +3,4 @@ __pycache__/
 scratch.py
 test*.py
 *workspace*
-*TODO*
+TODO.txt

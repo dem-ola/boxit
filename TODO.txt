@@ -1,9 +1,0 @@
-
-Boxes - 
-    - map a function over contents or a specific item in contents
-    - size of box : how many internal items OR memory?
-    - allow pickle
-    - allow JSON?
-
-    - for Crates how many boxes and sum items in all the boxes
-    - check contents inside boxes in crates eg basecontents()?
