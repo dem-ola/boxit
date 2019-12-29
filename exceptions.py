@@ -10,6 +10,8 @@ class BoxItemTypeError(BoxExceptionError):
 	pass
 class BoxNameError(BoxExceptionError):
 	pass
+class BoxDuplicateError(BoxExceptionError):
+	pass
 class BoxLockedError(BoxExceptionError):
 	pass
 class BoxImplementationError(BoxExceptionError):

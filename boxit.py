@@ -1,8 +1,9 @@
-import sys, inspect
+import sys, inspect, hashlib
 from abc import ABCMeta, abstractmethod
+from collections import namedtuple
 from exceptions import *
 
-class BoxABC(metaclass=ABCMeta):
+class VesselABC(metaclass=ABCMeta):
 	''' Protocol for Box-like classes '''
 	@abstractmethod
 	def lock(self): pass
@@ -17,63 +18,65 @@ class BoxABC(metaclass=ABCMeta):
 	@abstractmethod
 	def empty(self): pass
 
+	@classmethod
 	def internal(cls):
-		# method hoisted up here so usable by BoxABC subclasses
-		# checks if request from an expected class method
+		''' checks if request is from an expected class method 
+		
+		We wish for some methods to be called only from class methods.
+		A hack could:
+		(A) call <instance>.<method> from an external function
+		However, the frame globals dict will have the function name as a key 
+		but this won't be the case if caller is an internal method.
+		hence: ... caller not in frame.f_globals check ...
+		(B) make a direct <instance>.<method> call (not from inside a function)
+		but here caller is '<module>' and won't be in dir(cls)
+		hence: ... caller in dir(cls) check ...
+		
+		'''
 		frame = sys._getframe()
 		caller = frame.f_back.f_code.co_name
-		# caller is name of calling function but
-		# it is possible to hack this by defining an outside function
-		# and then calling <obj>.<method> from there. BUT for these cases
-		# the frame globals dict will have the function name as a key but
-		# this is not the case if caller is an inside method ...
 		if caller not in frame.f_globals and \
 			caller in dir(cls):
-			# and is a method of cls so avoids naked <obj>.<attr> calls
-			# from the outside (i.e. not from inside an outside functions)
-			# in these cases -> caller is '<module>' and won't be in dir(cls)
 			return True
 		return False
 
 class BoxList(list):
 	''' variant of Python's list to store Box contents '''
 	
-	# here's a list of methods we need
+	# methods we need; then we disable the rest - throw error if called
 	implement = [
 		'__new__', '__init__', '__str__', '__repr__', '__doc__', '__dir__',
 		'__iter__', '__len__', '__contains__', '__getitem__', 
 		'__getattribute__','__eq__',
-		'index', 'count',  ]
-	# disable methods we don't want accessible i.e. the rest
+		'index', 'count', 'insert' ]
+	
 	for i in dir(list):
 		if i not in implement:
 			code = exec(f'def {i}(self): raise BoxImplementationError(' +
-										'"{i} is not implemented")')
+										f'"{i} is not implemented")')
 
 	@classmethod
 	def internal(cls, caller):
-		# check if request is from inside a Box-type subclass
+		''' check if request is from inside a Box-type subclass '''
+		# nb. diff to that in VesselABC
 		frame = sys._getframe()
-		# caller is name of calling function but
-		# it is possible to hack this by defining an outside function
-		# and then calling <obj>.method from there. BUT for these cases
-		# the frame globals dict will have the function name as a key but
-		# this is not the case if caller is an inside method ...
 		if caller not in frame.f_globals and \
 			caller in dir(Box):
-			# and is a method of cls so avoids naked <obj>.method calls
-			# from the outside (i.e. not from inside an outside functions)
-			# in these cases -> caller is '<module>' and won't be in dir(Box)
 			return True
 		return False
 
 	def append(self, item):
-		# we get calling func here instead of inside 'internal' classmethod
-		# here: caller = Box.method e.g. 'put' <- what we want
-		# inside 'internal': this.append <- not what we want
+		# we get caller i.e. calling func here instead of inside 'internal'
+		# here: caller = method that called append e.g. 'put' <- what we want
+		# inside 'internal': would be append <- not what we want
 		caller = sys._getframe().f_back.f_code.co_name
 		if BoxList.internal(caller):
 			super().append(item)
+
+	def insert(self, position, item):
+		caller = sys._getframe().f_back.f_code.co_name
+		if BoxList.internal(caller):
+			super().insert(position, item)
 
 	def remove(self, item):
 		caller = sys._getframe().f_back.f_code.co_name
@@ -84,48 +87,27 @@ class BoxList(list):
 		caller = sys._getframe().f_back.f_code.co_name
 		if BoxList.internal(caller):
 			super().clear()
+
+class Vessel(VesselABC):
+	''' super class for various vessels '''
+
+	_hash_dict = {}
+	_mutables = [list, tuple, dict, set, frozenset]
+	_accepts = _mutables + [str, int, float, complex]
+	Item = namedtuple('Item', ['id', 'name', 'item', 'typ', 'vessel'])
+	__items = BoxList()
 		
-class Box(BoxABC):
-	'''
-		Creates boxes for keeping data 'relatively' safe
-
-		Often we pass data/collections around a program that we
-		don't want changed without our knowledge in another part of the program.
-		The intention behind this class is to avoid inadvertent data tampering
-		It's NOT intended to prevent hacking the data by those who know how.
-
-		Boxes can be locked to stop their contents being amended.
-		Although a BoxList (stores the box's contents) inherits from the 
-		bog-standard Python list object many attributes have been disabled. 
-		For instance you cannot natively assign to a box. Instead you use 
-		special methods for storage ('put') and retrieval. 
-
-		Use:
-		# see the docs
-	'''
-
-	_accepts = [
-		str, 
-		list,
-		tuple,
-		dict,
-		set,
-		frozenset, 
-		int,
-		float,
-		complex,
-	]
-
-	_mutables = [list, tuple, dict, set]
-	_names_dict = {}
-	
-	def __init__(self, *, key, name=None, itype=None):
-		self.keyset = False
-		self.key = key
-		self.name = name
-		self.itype = itype
-		self.contents = BoxList()
+	def __init__(self, *, key=None, name=None, itype=None):
 		self.isopen = True
+		self.__keyset = False
+		self.key = key
+		self.__itype = itype
+		self.__items = BoxList()
+		self.vessel = None
+		# keep .name as last item!
+		# b/c of _is_duplicates and b/c name prop returns
+		# any attr below name won't be included in atrributes list
+		self.name = name 
 
 	@property
 	def key(self):
@@ -136,32 +118,83 @@ class Box(BoxABC):
 
 	@key.setter
 	def key(self, key):
-		if not self.keyset: 
+		if not self.__keyset: 
 			# can set first time only; store in double _ to enforce mangling 
 			# and frustrate attempt to access from outside the class
 			self.__key = key
-			self.keyset = True
-		else: # can't reset keys after init
+			self.__keyset = True
+		else:
 			raise BoxKeyAccessError('Keys cannot be reset')
+
+	def __update__(self, action, item, name, oldhash=None):
+		''' update hash_dict and __items list '''
+
+		# vessels are usually doing that something to or with items so 
+		# normally vessel = self; however we also want to add vessels on creation
+		# to hash_dict but a vessel's vessel is not itself: here vessel = None
+		vessel = self
+		if self == item: vessel = None
+
+		# delete entry with old name
+		if action in ['del', 'reset']:
+			olditem = Vessel._hash_dict[oldhash]
+			vessel = olditem.vessel
+			del Vessel._hash_dict[oldhash]
+
+		if action != 'del':
+			named = Vessel.Item(
+								id=id(item), 
+								name=name, 
+								item=item, 
+								typ=type(item),
+								vessel=vessel
+								)
+			hash_str = self._hash_str(id(item), name, item)
+			Vessel._hash_dict[self._hash(hash_str)] = named
+
+		# update the __items list
+		if vessel is not None:
+			vessel.__items = BoxList([(v.id, v.name, v.item) 
+								for v in Vessel._hash_dict.values()
+								if v.vessel==vessel])
+		
+	@property
+	def __ids(self):
+		return BoxList([a[0] for a in self.__items])
+
+	@property
+	def name_contents(self):
+		return BoxList([(a[1],a[2]) for a in self.__items])
+
+	@property
+	def names(self):
+		return BoxList([a[1] for a in self.__items])
 
 	@property
 	def contents(self):
-		''' define contents as property to set as read only '''
-		return self.__contents
+		return BoxList([a[2] for a in self.__items])
 
-	@contents.setter
-	def contents(self, item):
-		''' only accept an empty BoxList 
+	def contains(self, item):
+		return item in self.contents or item in self.names
 
-			prevents assignment statements <box>.contents = [something] or
-			<box>.contents = [alist] + <box>.contents
-			nb. ... = <box>.contents + [alist] fails b/c __add__ not implemented
-		'''
-		if len(item) == 0:
-			self.__contents = item
+	def _hash_str(self, *args):
+		return ''.join(str(a) for a in args)
 
-	def _key_check(self, key):
-		if not self.isopen:
+	def _hash(self, string):
+		hashed = hashlib.sha256(string.encode()).hexdigest()
+		return hashed
+
+	def _is_duplicate(self, name, item):
+		dup_name = False if name is None else name in self.names
+		if dup_name:
+			raise BoxDuplicateError('This name has been used')
+		if id(item) in self.__ids or (name, item) in self.name_contents:
+			raise BoxDuplicateError('This item has already been boxed')
+		return False
+
+	def _key_check(self, key, action=None):
+		''' check key is correct '''
+		if not self.isopen or action == 'lock':
 			if key is None:
 				raise BoxLockedError('Box is locked. Provide a key')
 			elif key != self.key:
@@ -169,77 +202,42 @@ class Box(BoxABC):
 		return True
 
 	def _type_check(self, item):
-		if self.itype is not None:
-			if not isinstance(item, self.itype):
-				raise BoxItemTypeError(f'item {item} must be of box type {self.itype}')
+		''' check type is expected '''
+		if self.__itype is not None:
+			if not isinstance(item, self.__itype):
+				raise BoxItemTypeError(f'item {item} must be of box type {self.__itype}')
 		elif type(item) not in self._accepts:
 			raise BoxItemTypeError(f'item {item} must be one of {self._accepts}')
 		return True
 
 	def _kw_check(self, kw, exp, typ):
+		''' check requested keyword is of expected data type '''
 		if not isinstance(kw, typ):
 			raise BoxExceptionError(f'Expected {exp} of type {typ.__name__}')
 		return True
 
 	def _index_check(self, index):
+		''' test requested index is in range '''
 		if index < 0 or index > len(self.contents) - 1:
 			raise BoxItemAccessError('Index out of range')
 		return True
 
-	def _with_names(self):
-		return [(name, type(item).__name__) for 
-						name, item in self._names_dict.items()]
-
-	def _without_names(self):
-		return [(None, type(item).__name__) for item in self.contents if 
-					item not in self._names_dict.values()]
-
-	def _name_check(self, name):
-		return name in self._names_dict
-
-	def _named_check(self, item):
-		return item in self._names_dict.values()
-
-	def _name_pass(self, name1=None, name2=None, action=None):
-		''' checks for setting, deleting, renaming names '''
-		
-		if action == 'setname':
-			if self._name_check(name1):	# name used already
-				raise BoxNameError('This name already exists. Try another')
-		
-		elif action == 'rename':
-			if name1 is None or name2 is None:
-				raise BoxNameError('Provide both old, new names as arguments')
-			if not self._name_check(name1):
-				raise BoxNameError('The old name does not exist')
-			if self._name_check(name2):
-				raise BoxNameError('This name already exists. Pick another')
-
-		elif action == 'delname':
-			if not self._name_check(name1):
-				raise BoxNameError('This name does not exist')
-		
-		return True
-
 	def put(self, item, name=None, key=None):
+		''' add to contents '''
 		if self._key_check(key) and self._type_check(item):
-			# copy mutables so can't be changed from outside box
 			if type(item) in self._mutables:
 				from copy import deepcopy
 				item = deepcopy(item)
-
-			# cache name and save
-			if name is not None: 
-				self._names_dict[name] = item
-			self.contents.append(item)
-
-	def contains(self, item):
-		if not self.isopen:
-			raise BoxLockedError('Box is locked. Provide a key')
-		return item in self.contents
-
-	def __get__(self, **kwargs):
-		''' takes item out of box '''
+			if name is None:
+				try: name = item.name # use pre-existing if available
+				except: pass
+			if not self._is_duplicate(name, item):
+				try: item.name = name	# assign attribute
+				except: pass # nb. 
+				self.__update__('put', item, name)
+				
+	def __find__(self, **kwargs):
+		''' locates item for fetch, use, destroy etc '''
 
 		action = kwargs.get('action')
 		name = kwargs.get('name')
@@ -249,15 +247,15 @@ class Box(BoxABC):
 		if not self.isopen:
 			raise BoxLockedError('Box is locked. Provide a key')
 
+		# try and retrieve the item
 		if name is not None:
 			if self._kw_check(name, 'name', str):
-				item = self._names_dict.get(name)
-		
+				item = [v[1] for v in self.name_contents if v[0]==name][0]
 		elif index is not None:
 			if self._kw_check(index, 'index', int):
 				if self._index_check(index):
-					item = self.contents[index]
-		
+					name = self.name_contents[index][0]				
+					item = self.name_contents[index][1]
 		elif item is not None:
 			if not self.contains(item):
 				item = None
@@ -265,83 +263,125 @@ class Box(BoxABC):
 		if item is None:
 			raise BoxItemAccessError(f'Box does not have requested item')
 		else:
-			if action in ['fetch', 'destroy']: 
-				self.contents.remove(item)	
+			if action in ['fetch', 'destroy']:
+				hash_str = self._hash_str(id(item), name, item)
+				self.__update__('del', item, name, oldhash=self._hash(hash_str))
 			if action in ['fetch', 'use']: 
 				return item
 
 	def fetch(self, /, **kwargs):
-		return self.__get__(action='fetch', **kwargs)
+		return self.__find__(action='fetch', **kwargs)
 
 	def use(self, /, **kwargs):
-		return self.__get__(action='use', **kwargs)
+		return self.__find__(action='use', **kwargs)
 
 	def destroy(self, /, **kwargs):
-		self.__get__(action='destroy', **kwargs)
+		self.__find__(action='fetch', **kwargs)
 
 	def lock(self, key):
-		if self._key_check(key):
+		if self._key_check(key, action='lock'):
 			self.isopen = False
 
-	def open(self, key):
+	def open(self, key=None):
 		if self._key_check(key):
 			self.isopen = True
 
-	def getnames(self, key=None):
-		if self._key_check(key):
-			return self._with_names() + self._without_names()
+	@property
+	def name(self):
+		''' for Vessels only '''
+		return self.__name
 
-	def setname(self, index, name, key=None):
+	@name.setter
+	def name(self, name):
+		# need to distinguish between vessel's name and names of its items
+		# we use global hash_dict to check for uniqueness of name
+		if name is not None:
+			for v in Vessel._hash_dict.values():
+				if v.name == name:
+					raise BoxNameError('This name has been used')
+
+		# retrieve any existing name; nb this won't exist yet at __init__
+		try: 
+			oldname = self.name # will fail at __init__; passes for name resets
+			if oldname != name:
+				hash_str = self._hash_str(id(self), oldname, self)
+				self.__name = name
+				self.__update__('reset', self, name, 
+								oldhash=self._hash(hash_str))
+			else:
+				pass # no change required
+		except: # for __init__
+			self.__name = name	
+			self.__update__('put', self, name)	
+
+	def getname(self, item=None):
+		''' for vessels and Python base objects '''
+		# returns first matching object
+		if issubclass(type(item), Vessel):
+			if item is None:	# cases of Vessel.getname()
+				return self.name
+			else:				# case - Vessel.getname(item itsel a vessel)
+				return item.name
+		else:	
+			# case - item is not a vessel
+			return [a[1] for a in self.__items if a[2] == item][0]
+		
+	def setname(self, item, name, key=None):
 		''' only for items without names '''
-		if self._key_check(key) and \
-			self._index_check(index):
-			if self._name_pass(name, action='setname'):	# name not used already
-				it = self.contents[index]
-				if self._named_check(it):	# item named previously
-					raise BoxNameError('This item already has a name')
-				self._names_dict[name] = it
-
-	def rename(self, old=None, new=None, key=None):
-		''' only for items with names '''
 		if self._key_check(key):
-			if self._name_pass(old, new, action='rename'):
-				self._names_dict[new] = self._names_dict[old]
-				del self._names_dict[old]
-
-	def delname(self, name=None, key=None):
-		''' only for items with names '''
-		if self._key_check(key):
-			if self._name_pass(name):
-				del self._names_dict[name]
+			if name is not None and name in self.names:
+				raise BoxDuplicateError('This name has been used')
+			else:
+				if issubclass(item.__class__, Vessel):
+					hash_str = self._hash_str(id(item), item.name, item)
+				else:
+					oldname = self.getname(item)
+					hash_str = self._hash_str(id(item), oldname, item)
+				self.__update__('reset', item, name,
+								oldhash=self._hash(hash_str))
 
 	def empty(self, key=None):
+		''' empty vessel '''
 		if self._key_check(key):
-			return self.contents.clear()
+			Vessel._hash_dict.clear()
+			self.__items = BoxList()	
 			
 	@property
 	def isempty(self):
 		return self.contents == []
 
 	def __str__(self):
-		return self.name or 'A Box'
+		return 'Vessel' if self.name is None else self.name
+	def __repr__(self):
+		v = 'Vessel'
+		return f'{v}()' if self.name is None else f"{v}(name='{self.name}')"
 
-class Crate(Box):
-	''' store boxes '''
-	def __init__(self, *, key, name='Crate', itype=Box):
+class Box(Vessel):
+	''' stores boxes '''
+	def __init__(self, *, key=None, name=None, itype=None):
 		super().__init__(key=key, name=name, itype=itype)
-	def contains(self):
-		''' because can't use names yet to select boxes '''
-		return NotImplemented
+	def __str__(self):
+		return 'Box' if self.name is None else self.name
+	def __repr__(self):
+		v = 'Box'
+		return f'{v}()' if self.name is None else f"{v}(name='{self.name}')"
 
-class Container(Box):
-	''' store crates '''
-	def __init__(self, *, key, name='Container', itype=Crate):
+class Crate(Vessel):
+	''' stores boxes '''
+	def __init__(self, *, key=None, name=None, itype=Box):
 		super().__init__(key=key, name=name, itype=itype)
-	def contains(self):
-		''' because can't use names yet to select crates '''
-		return NotImplemented
+	def __str__(self):
+		return 'Crate' if self.name is None else self.name
+	def __repr__(self):
+		v = 'Crate'
+		return f'{v}()' if self.name is None else f"{v}(name='{self.name}')"
 
-
-
-
-
+class Container(Vessel):
+	''' stores crates '''
+	def __init__(self, *, key=None, name=None, itype=Crate):
+		super().__init__(key=key, name=name, itype=itype)
+	def __str__(self):
+		return 'Container' if self.name is None else self.name
+	def __repr__(self):
+		v = 'Container'
+		return f'{v}()' if self.name is None else f"{v}(name='{self.name}')"
