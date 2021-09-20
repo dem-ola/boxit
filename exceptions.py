@@ -1,4 +1,6 @@
 ''' Exceptions '''
+from dataclasses import dataclass
+import dataclasses
 
 class BoxExceptionError(Exception):
 	pass

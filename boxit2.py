@@ -97,6 +97,8 @@ class Vessel(VesselABC):
 	_accepts = _mutables + [str, int, float, complex]
 	Item = namedtuple('Item', ['id', 'name', 'item', 'typ', 'vessel'])
 	__items = BoxList()
+
+	LOCKED_MSG = 'Box is locked. Provide a key to unlock.'
 		
 	def __init__(self, *, key=None, name=None, itype=None):
 		self.isopen = True
@@ -197,7 +199,7 @@ class Vessel(VesselABC):
 		''' check key is correct '''
 		if not self.isopen or action == 'lock':
 			if key is None:
-				raise BoxLockedError('Box is locked. Provide a key')
+				raise BoxLockedError(Vessel.LOCKED_MSG)
 			elif key != self.key:
 				raise BoxKeyAccessError('Wrong key')
 		return True
@@ -246,7 +248,7 @@ class Vessel(VesselABC):
 		item = kwargs.get('item')
 		
 		if not self.isopen:
-			raise BoxLockedError('Box is locked. Provide a key')
+			raise BoxLockedError(Vessel.LOCKED_MSG)
 
 		# try and retrieve the item
 		if name is not None:
