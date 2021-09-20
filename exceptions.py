@@ -4,7 +4,9 @@ import dataclasses
 
 class BoxExceptionError(Exception):
 	pass
-class BoxKeyAccessError(BoxExceptionError):
+class BoxLockError(BoxExceptionError):
+	pass
+class BoxKeyError(BoxExceptionError):
 	pass
 class BoxItemAccessError(BoxExceptionError):
 	pass
@@ -13,8 +15,6 @@ class BoxItemTypeError(BoxExceptionError):
 class BoxNameError(BoxExceptionError):
 	pass
 class BoxDuplicateError(BoxExceptionError):
-	pass
-class BoxLockError(BoxExceptionError):
 	pass
 class BoxImplementationError(BoxExceptionError):
 	pass

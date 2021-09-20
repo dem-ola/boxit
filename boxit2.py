@@ -100,10 +100,9 @@ class Vessel(VesselABC):
 
 	LOCKED_MSG = 'Box is locked. Provide a key to unlock.'
 		
-	def __init__(self, *, key=None, name=None, itype=None):
+	def __init__(self, *, name=None, itype=None):
 		self.isopen = True
 		self.__keyset = False
-		self.key = key
 		self.__itype = itype
 		self.__items = BoxList()
 		self.vessel = None
@@ -117,17 +116,18 @@ class Vessel(VesselABC):
 		# only release key if request from class method
 		if super().internal():
 			return self.__key
-		raise BoxKeyAccessError('You cannot directly access a key')
+		raise BoxKeyError('You cannot directly access a key')
 
 	@key.setter
 	def key(self, key):
+		print('k', key, self.__keyset)
 		if not self.__keyset: 
 			# can set first time only; store in double _ to enforce mangling 
 			# and frustrate attempt to access from outside the class
 			self.__key = key
 			self.__keyset = True
 		else:
-			raise BoxKeyAccessError('Keys cannot be reset')
+			raise BoxKeyError('Keys cannot be reset')
 
 	def __update__(self, action, item, name, oldhash=None):
 		''' update hash_dict and __items list '''
@@ -199,9 +199,9 @@ class Vessel(VesselABC):
 		''' check key is correct '''
 		if not self.isopen:
 			if key is None:
-				raise BoxLockError(Vessel.LOCKED_MSG)
+				raise BoxLockError('Box is locked. Provide a key to unlock.')
 			elif key != self.key:
-				raise BoxKeyAccessError('Wrong key')
+				raise BoxKeyError('Wrong key.')
 		return True
 
 	def _type_check(self, item):
@@ -286,6 +286,7 @@ class Vessel(VesselABC):
 			raise BoxLockError('Provide a key to lock.')
 		elif not isinstance(key, str):
 			raise BoxLockError('Key must be string.')
+		self.key = key
 		self.isopen = False
 
 	def open(self, key:str=None):
@@ -365,7 +366,7 @@ class Vessel(VesselABC):
 class Box(Vessel):
 	''' stores boxes '''
 	def __init__(self, *, key=None, name=None, itype=None):
-		super().__init__(key=key, name=name, itype=itype)
+		super().__init__(name=name, itype=itype)
 	def __str__(self):
 		return 'Box' if self.name is None else self.name
 	def __repr__(self):
@@ -374,8 +375,8 @@ class Box(Vessel):
 
 class Crate(Vessel):
 	''' stores boxes '''
-	def __init__(self, *, key=None, name=None, itype=Box):
-		super().__init__(key=key, name=name, itype=itype)
+	def __init__(self, *, name=None, itype=Box):
+		super().__init__(name=name, itype=itype)
 	def __str__(self):
 		return 'Crate' if self.name is None else self.name
 	def __repr__(self):
@@ -384,8 +385,8 @@ class Crate(Vessel):
 
 class Container(Vessel):
 	''' stores crates '''
-	def __init__(self, *, key=None, name=None, itype=Crate):
-		super().__init__(key=key, name=name, itype=itype)
+	def __init__(self, *, name=None, itype=Crate):
+		super().__init__(name=name, itype=itype)
 	def __str__(self):
 		return 'Container' if self.name is None else self.name
 	def __repr__(self):
