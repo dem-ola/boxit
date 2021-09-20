@@ -195,11 +195,11 @@ class Vessel(VesselABC):
 			raise BoxDuplicateError('This item has already been boxed')
 		return False
 
-	def _key_check(self, key, action=None):
+	def _good_key(self, key, action=None):
 		''' check key is correct '''
-		if not self.isopen or action == 'lock':
+		if not self.isopen:
 			if key is None:
-				raise BoxLockedError(Vessel.LOCKED_MSG)
+				raise BoxLockError(Vessel.LOCKED_MSG)
 			elif key != self.key:
 				raise BoxKeyAccessError('Wrong key')
 		return True
@@ -227,7 +227,7 @@ class Vessel(VesselABC):
 
 	def put(self, item, name=None, key=None):
 		''' add to contents '''
-		if self._key_check(key) and self._type_check(item):
+		if self._good_key(key) and self._type_check(item):
 			if type(item) in self._mutables:
 				from copy import deepcopy
 				item = deepcopy(item)
@@ -248,7 +248,7 @@ class Vessel(VesselABC):
 		item = kwargs.get('item')
 		
 		if not self.isopen:
-			raise BoxLockedError(Vessel.LOCKED_MSG)
+			raise BoxLockError(Vessel.LOCKED_MSG)
 
 		# try and retrieve the item
 		if name is not None:
@@ -281,12 +281,15 @@ class Vessel(VesselABC):
 	def destroy(self, /, **kwargs):
 		self.__find__(action='fetch', **kwargs)
 
-	def lock(self, key):
-		if self._key_check(key, action='lock'):
-			self.isopen = False
+	def lock(self, key:str=None):
+		if key is None:
+			raise BoxLockError('Provide a key to lock.')
+		elif not isinstance(key, str):
+			raise BoxLockError('Key must be string.')
+		self.isopen = False
 
-	def open(self, key=None):
-		if self._key_check(key):
+	def open(self, key:str=None):
+		if self._good_key(key):
 			self.isopen = True
 
 	@property
@@ -331,7 +334,7 @@ class Vessel(VesselABC):
 		
 	def setname(self, item, name, key=None):
 		''' only for items without names '''
-		if self._key_check(key):
+		if self._good_key(key):
 			if name is not None and name in self.names:
 				raise BoxDuplicateError('This name has been used')
 			else:
@@ -345,7 +348,7 @@ class Vessel(VesselABC):
 
 	def empty(self, key=None):
 		''' empty vessel '''
-		if self._key_check(key):
+		if self._good_key(key):
 			Vessel._hash_dict.clear()
 			self.__items = BoxList()	
 			
