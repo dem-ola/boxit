@@ -117,15 +117,10 @@ class Vessel(VesselABC):
 	@property
 	def key(self):
 		# only release key if request from class method
-		#if super().internal():
-		frame = sys._getframe()
-		caller = frame.f_back.f_code.co_name
-		#print('call', caller)
-		#print(frame.f_globals)
-		if caller not in frame.f_globals and \
-			caller in dir(Vessel):
-			return self.__key
-		raise BoxKeyError('You cannot directly access a key')
+		caller = self.get_caller(sys._getframe())
+		if caller not in dir(Vessel):
+			raise BoxKeyError('You cannot directly access a key')
+		return self.__key
 
 	@key.setter
 	def key(self, key):
