@@ -19,28 +19,6 @@ class VesselABC(metaclass=ABCMeta):
 	@abstractmethod
 	def empty(self): pass
 
-	@classmethod
-	def internal(cls):
-		''' checks if request is from an expected class method 
-		
-		We wish for some methods to be called only from class methods.
-		A hack could:
-		(A) call <instance>.<method> from an external function
-		However, the frame globals dict will have the function name as a key 
-		but this won't be the case if caller is an internal method.
-		hence: ... caller not in frame.f_globals check ...
-		(B) make a direct <instance>.<method> call (not from inside a function)
-		but here caller is '<module>' and won't be in dir(cls)
-		hence: ... caller in dir(cls) check ...
-		
-		'''
-		frame = sys._getframe()
-		caller = frame.f_back.f_code.co_name
-		if caller not in frame.f_globals and \
-			caller in dir(cls):
-			return True
-		return False
-
 class BoxList(list):
 	''' variant of Python's list to store Box contents '''
 	
@@ -97,35 +75,45 @@ class Vessel(VesselABC):
 	_accepts = _mutables + [str, int, float, complex]
 	Item = namedtuple('Item', ['id', 'name', 'item', 'typ', 'vessel'])
 	__items = BoxList()
+
+	LOCKED_MSG = 'Box is locked. Provide a key to unlock.'
 		
-	def __init__(self, *, key=None, name=None, itype=None):
+	def __init__(self, *, name=None, itype=None):
 		self.isopen = True
 		self.__keyset = False
-		self.key = key
 		self.__itype = itype
 		self.__items = BoxList()
 		self.vessel = None
 		# keep .name as last item!
 		# b/c of _is_duplicates and b/c name prop returns
 		# any attr below name won't be included in atrributes list
-		self.name = name 
+		self.name = name
+
+	def get_caller(self, frame):
+		return frame.f_back.f_code.co_name
 
 	@property
 	def key(self):
 		# only release key if request from class method
-		if super().internal():
-			return self.__key
-		raise BoxKeyAccessError('You cannot directly access a key')
+		caller = self.get_caller(sys._getframe())
+		if caller not in dir(Vessel):
+			raise BoxKeyError('You cannot directly access a key')
+		return self.__key
 
 	@key.setter
 	def key(self, key):
-		if not self.__keyset: 
-			# can set first time only; store in double _ to enforce mangling 
-			# and frustrate attempt to access from outside the class
-			self.__key = key
-			self.__keyset = True
+		caller = self.get_caller(sys._getframe())
+		if caller == 'lock':
+			if not self.__keyset: 
+				# Store in double _ to enforce mangling 
+				# and frustrate attempt to access from outside the class
+				self.__key = key
+				self.__keyset = True
+			else:
+				raise BoxKeyError('Keys cannot be reset.')
 		else:
-			raise BoxKeyAccessError('Keys cannot be reset')
+			raise BoxKeyError('Keys can only be set via lock method.')
+			
 
 	def __update__(self, action, item, name, oldhash=None):
 		''' update hash_dict and __items list '''
@@ -193,13 +181,13 @@ class Vessel(VesselABC):
 			raise BoxDuplicateError('This item has already been boxed')
 		return False
 
-	def _key_check(self, key, action=None):
+	def _good_key(self, key):
 		''' check key is correct '''
-		if not self.isopen or action == 'lock':
+		if not self.isopen:
 			if key is None:
-				raise BoxLockedError('Box is locked. Provide a key')
+				raise BoxLockError('Box is locked. Provide a key to unlock.')
 			elif key != self.key:
-				raise BoxKeyAccessError('Wrong key')
+				raise BoxKeyError('Wrong key.')
 		return True
 
 	def _type_check(self, item):
@@ -225,7 +213,7 @@ class Vessel(VesselABC):
 
 	def put(self, item, name=None, key=None):
 		''' add to contents '''
-		if self._key_check(key) and self._type_check(item):
+		if self._good_key(key) and self._type_check(item):
 			if type(item) in self._mutables:
 				from copy import deepcopy
 				item = deepcopy(item)
@@ -246,7 +234,7 @@ class Vessel(VesselABC):
 		item = kwargs.get('item')
 		
 		if not self.isopen:
-			raise BoxLockedError('Box is locked. Provide a key')
+			raise BoxLockError(Vessel.LOCKED_MSG)
 
 		# try and retrieve the item
 		if name is not None:
@@ -279,12 +267,16 @@ class Vessel(VesselABC):
 	def destroy(self, /, **kwargs):
 		self.__find__(action='fetch', **kwargs)
 
-	def lock(self, key):
-		if self._key_check(key, action='lock'):
-			self.isopen = False
+	def lock(self, key:str=None):
+		if key is None:
+			raise BoxLockError('Provide a key to lock.')
+		elif not isinstance(key, str):
+			raise BoxLockError('Key must be string.')
+		self.key = key
+		self.isopen = False
 
-	def open(self, key=None):
-		if self._key_check(key):
+	def open(self, key:str=None):
+		if self._good_key(key):
 			self.isopen = True
 
 	@property
@@ -329,7 +321,7 @@ class Vessel(VesselABC):
 		
 	def setname(self, item, name, key=None):
 		''' only for items without names '''
-		if self._key_check(key):
+		if self._good_key(key):
 			if name is not None and name in self.names:
 				raise BoxDuplicateError('This name has been used')
 			else:
@@ -343,7 +335,7 @@ class Vessel(VesselABC):
 
 	def empty(self, key=None):
 		''' empty vessel '''
-		if self._key_check(key):
+		if self._good_key(key):
 			Vessel._hash_dict.clear()
 			self.__items = BoxList()	
 			
@@ -359,8 +351,8 @@ class Vessel(VesselABC):
 
 class Box(Vessel):
 	''' stores boxes '''
-	def __init__(self, *, key=None, name=None, itype=None):
-		super().__init__(key=key, name=name, itype=itype)
+	def __init__(self, *, name=None, itype=None):
+		super().__init__(name=name, itype=itype)
 	def __str__(self):
 		return 'Box' if self.name is None else self.name
 	def __repr__(self):
@@ -369,8 +361,8 @@ class Box(Vessel):
 
 class Crate(Vessel):
 	''' stores boxes '''
-	def __init__(self, *, key=None, name=None, itype=Box):
-		super().__init__(key=key, name=name, itype=itype)
+	def __init__(self, *, name=None, itype=Box):
+		super().__init__(name=name, itype=itype)
 	def __str__(self):
 		return 'Crate' if self.name is None else self.name
 	def __repr__(self):
@@ -379,8 +371,8 @@ class Crate(Vessel):
 
 class Container(Vessel):
 	''' stores crates '''
-	def __init__(self, *, key=None, name=None, itype=Crate):
-		super().__init__(key=key, name=name, itype=itype)
+	def __init__(self, *, name=None, itype=Crate):
+		super().__init__(name=name, itype=itype)
 	def __str__(self):
 		return 'Container' if self.name is None else self.name
 	def __repr__(self):
