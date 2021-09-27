@@ -109,25 +109,38 @@ class Vessel(VesselABC):
 		# keep .name as last item!
 		# b/c of _is_duplicates and b/c name prop returns
 		# any attr below name won't be included in atrributes list
-		self.name = name 
+		self.name = name
+
+	def get_caller(self, frame):
+		return frame.f_back.f_code.co_name
 
 	@property
 	def key(self):
 		# only release key if request from class method
-		if super().internal():
+		#if super().internal():
+		frame = sys._getframe()
+		caller = frame.f_back.f_code.co_name
+		#print('call', caller)
+		#print(frame.f_globals)
+		if caller not in frame.f_globals and \
+			caller in dir(Vessel):
 			return self.__key
 		raise BoxKeyError('You cannot directly access a key')
 
 	@key.setter
 	def key(self, key):
-		print('k', key, self.__keyset)
-		if not self.__keyset: 
-			# can set first time only; store in double _ to enforce mangling 
-			# and frustrate attempt to access from outside the class
-			self.__key = key
-			self.__keyset = True
+		caller = self.get_caller(sys._getframe())
+		if caller == 'lock':
+			if not self.__keyset: 
+				# Store in double _ to enforce mangling 
+				# and frustrate attempt to access from outside the class
+				self.__key = key
+				self.__keyset = True
+			else:
+				raise BoxKeyError('Keys cannot be reset.')
 		else:
-			raise BoxKeyError('Keys cannot be reset')
+			raise BoxKeyError('Keys can only be set via lock method.')
+			
 
 	def __update__(self, action, item, name, oldhash=None):
 		''' update hash_dict and __items list '''
@@ -195,7 +208,7 @@ class Vessel(VesselABC):
 			raise BoxDuplicateError('This item has already been boxed')
 		return False
 
-	def _good_key(self, key, action=None):
+	def _good_key(self, key):
 		''' check key is correct '''
 		if not self.isopen:
 			if key is None:
@@ -365,7 +378,7 @@ class Vessel(VesselABC):
 
 class Box(Vessel):
 	''' stores boxes '''
-	def __init__(self, *, key=None, name=None, itype=None):
+	def __init__(self, *, name=None, itype=None):
 		super().__init__(name=name, itype=itype)
 	def __str__(self):
 		return 'Box' if self.name is None else self.name
