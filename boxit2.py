@@ -19,28 +19,6 @@ class VesselABC(metaclass=ABCMeta):
 	@abstractmethod
 	def empty(self): pass
 
-	@classmethod
-	def internal(cls):
-		''' checks if request is from an expected class method 
-		
-		We wish for some methods to be called only from class methods.
-		A hack could:
-		(A) call <instance>.<method> from an external function
-		However, the frame globals dict will have the function name as a key 
-		but this won't be the case if caller is an internal method.
-		hence: ... caller not in frame.f_globals check ...
-		(B) make a direct <instance>.<method> call (not from inside a function)
-		but here caller is '<module>' and won't be in dir(cls)
-		hence: ... caller in dir(cls) check ...
-		
-		'''
-		frame = sys._getframe()
-		caller = frame.f_back.f_code.co_name
-		if caller not in frame.f_globals and \
-			caller in dir(cls):
-			return True
-		return False
-
 class BoxList(list):
 	''' variant of Python's list to store Box contents '''
 	
